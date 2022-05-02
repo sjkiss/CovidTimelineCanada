@@ -290,6 +290,43 @@ convert_hr_names <- function(d) {
   dplyr::select(d, -.data$sub_region_1_original, -.data$hruid)
 }
 
+# postprocessing of combined dataset
+dataset_postprocess <- function(d, geo = c("pt", "hr", "sub-hr"), negative_daily_allowed = FALSE) {
+  match.arg(geo, c("pt", "hr", "sub-hr"), several.ok = FALSE)
+  col_names <- switch(
+    geo,
+    "pt" = {
+      col_names <- c("name", "date", "region")
+      # remove negative daily values
+      d[d$value_daily < 0, "value"] <- NA
+    },
+    "hr" = {
+      col_names <- c("name", "date", "region", "sub_region_1")
+      # remove negative daily values (negative values are permitted for sub_region_1 == "Unknown")
+      d[d$value_daily < 0 &
+          d$sub_region_1 != "Unknown", "value"] <- NA
+    },
+    "sub-hr" = {
+      col_names <- c("name", "date", "region", "sub_region_1", "sub_region_2")
+      # remove negative daily values (negative values are permitted for sub_region_1 or sub_region_2 == "Unknown")
+      d[d$value_daily < 0 &
+          d$sub_region_1 != "Unknown" &
+          d$sub_region_2 != "Unknown", "value"] <- NA
+    }
+  )
+  # replace negative daily values so that they become 0 (also recalculate value_daily)
+  d %>%
+    dplyr::select(-.data$value_daily) %>%
+    dplyr::arrange(!!!rlang::syms(col_names)) %>%
+    dplyr::group_by(!!!rlang::syms(col_names)) %>%
+    # replace NA cumulative values with the previous day's value
+    tidyr::fill(.data$value, .direction = "down") %>%
+    # calculate daily differences
+    dplyr::mutate(value_daily = c(dplyr::first(.data$value), diff(.data$value))) %>%
+    dplyr::ungroup()
+  # unfinished - requires multiple iterations to fix - also do we want to propegate back or forward???
+}
+
 # aggregate HR data up to PT
 agg2pt <- function(d) {
   d %>%
